@@ -1,1 +1,4 @@
-requests\ncryptography\nplaywright\n
+
+requests
+cryptography
+playwright

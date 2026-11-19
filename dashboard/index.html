@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Fakeface Account Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    :root{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:#172033;background:#f4f6fa}
+    *{box-sizing:border-box}body{margin:0}.wrap{max-width:1100px;margin:36px auto;padding:0 18px}
+    header{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:22px}
+    h1{font-size:25px;margin:0}button,input{font:inherit}button{border:0;border-radius:9px;padding:10px 15px;background:#2457d6;color:#fff;cursor:pointer}button.secondary{background:#e8edf8;color:#172033}
+    .panel,.stat{background:#fff;border:1px solid #e2e7f0;border-radius:14px;padding:18px;box-shadow:0 2px 8px #15264a0a}
+    #login{max-width:420px;margin:60px auto}.field{display:block;margin:13px 0}.field span{display:block;font-size:13px;margin-bottom:6px;color:#536078}.field input,#search{width:100%;padding:11px;border:1px solid #ccd4e2;border-radius:8px;background:#fff}
+    .stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:18px 0}.stat small{color:#65718a}.stat strong{display:block;font-size:27px;margin-top:5px}
+    .toolbar{display:flex;gap:12px;align-items:center;margin:16px 0}.toolbar input{max-width:330px}.muted{color:#66728a;font-size:13px}.tablewrap{overflow-x:auto}table{border-collapse:collapse;width:100%;min-width:780px;background:#fff}th,td{text-align:left;padding:12px;border-bottom:1px solid #edf0f5;font-size:14px}th{color:#64708a;font-weight:600;background:#fafbfe}.pill{display:inline-block;padding:4px 8px;border-radius:20px;background:#edf1f7;font-size:12px}.claimed{background:#e4f6eb;color:#17653a}.retry,.manual_review{background:#fff0df;color:#89500b}.error{color:#a52828;margin-top:12px}.hidden{display:none!important}.foot{margin-top:15px}.topline{display:flex;align-items:center;gap:10px}
+    @media(max-width:720px){.stats{grid-template-columns:repeat(2,minmax(0,1fr))}.wrap{margin:20px auto}header{align-items:flex-start;flex-direction:column}}
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <header><div><h1>Fakeface Account Dashboard</h1><div class="muted">Private account monitoring</div></div><div id="sessionBar" class="topline hidden"><span id="signedInAs" class="muted"></span><button id="logout" class="secondary">Sign out</button></div></header>
+
+    <section id="login" class="panel">
+      <h2>Sign in</h2><p class="muted">Use the dashboard user you created in Supabase Authentication.</p>
+      <form id="loginForm">
+        <label class="field"><span>Email</span><input id="email" type="email" autocomplete="username" required></label>
+        <label class="field"><span>Password</span><input id="password" type="password" autocomplete="current-password" required></label>
+        <button type="submit">Sign in</button><p id="loginError" class="error"></p>
+      </form>
+    </section>
+
+    <section id="dashboard" class="hidden">
+      <div class="stats">
+        <div class="stat"><small>Total accounts</small><strong id="total">—</strong></div>
+        <div class="stat"><small>Credits total</small><strong id="credits">—</strong></div>
+        <div class="stat"><small>Claimed / already claimed</small><strong id="claimed">—</strong></div>
+        <div class="stat"><small>Needs attention</small><strong id="attention">—</strong></div>
+      </div>
+      <div class="panel">
+        <div class="toolbar"><input id="search" type="search" placeholder="Search account ID"><button id="refresh" class="secondary">Refresh</button><span id="updated" class="muted">Not loaded yet</span></div>
+        <div class="tablewrap"><table><thead><tr><th>Account</th><th>Enabled</th><th>State</th><th>Credits</th><th>Last claim</th><th>Next claim</th><th>Next attempt</th><th>Last checked</th></tr></thead><tbody id="rows"><tr><td colspan="8">Loading…</td></tr></tbody></table></div>
+        <p id="dataError" class="error"></p>
+      </div>
+      <p class="muted foot">Refreshes every 30 seconds. Credit values are shown only when the automation has successfully collected them from the site.</p>
+    </section>
+  </main>
+<script>
+  // Replace these two placeholders before publishing this page.
+  const SUPABASE_URL = 'PASTE_YOUR_SUPABASE_PROJECT_URL_HERE';
+  const SUPABASE_PUBLISHABLE_KEY = 'PASTE_YOUR_SUPABASE_PUBLISHABLE_KEY_HERE';
+  const CONFIGURED = !SUPABASE_URL.includes('PASTE_') && !SUPABASE_PUBLISHABLE_KEY.includes('PASTE_');
+  const client = CONFIGURED ? window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY) : null;
+  const $ = (id) => document.getElementById(id);
+  let allRows = [];
+  const date = (value) => value ? new Date(value).toLocaleString() : '—';
+  const esc = (value) => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  function showDashboard(user){ $('login').classList.add('hidden'); $('dashboard').classList.remove('hidden'); $('sessionBar').classList.remove('hidden'); $('signedInAs').textContent = user.email || 'Signed in'; }
+  function showLogin(){ $('login').classList.remove('hidden'); $('dashboard').classList.add('hidden'); $('sessionBar').classList.add('hidden'); }
+  function render(){
+    const q = $('search').value.trim().toLowerCase();
+    const rows = allRows.filter(r => String(r.account_id).toLowerCase().includes(q));
+    $('total').textContent = allRows.length;
+    const known = allRows.filter(r => r.credits_balance !== null && r.credits_balance !== undefined);
+    $('credits').textContent = known.length ? known.reduce((n,r)=>n+Number(r.credits_balance||0),0).toLocaleString() : '—';
+    $('claimed').textContent = allRows.filter(r => ['claimed','already_claimed'].includes(r.status)).length;
+    $('attention').textContent = allRows.filter(r => ['retry','manual_review'].includes(r.status)).length;
+    $('rows').innerHTML = rows.length ? rows.map(r => `<tr><td>${esc(r.account_id)}</td><td>${r.enabled ? 'Yes':'No'}</td><td><span class="pill ${esc(r.status)}">${esc(r.status)}</span></td><td>${r.credits_balance == null ? '—' : esc(r.credits_balance)}</td><td>${date(r.last_claimed_at)}</td><td>${date(r.next_claim_at)}</td><td>${date(r.next_attempt_at)}</td><td>${date(r.credits_checked_at)}</td></tr>`).join('') : '<tr><td colspan="8">No matching accounts.</td></tr>';
+  }
+  async function loadRows(){
+    $('dataError').textContent='';
+    const {data,error} = await client.from('dashboard_accounts').select('*').order('account_id');
+    if(error){$('dataError').textContent = 'Could not load accounts: ' + error.message;return;}
+    allRows = data || []; render(); $('updated').textContent = 'Updated ' + new Date().toLocaleTimeString();
+  }
+  $('loginForm').addEventListener('submit', async (e)=>{
+    e.preventDefault(); $('loginError').textContent='';
+    if(!CONFIGURED){$('loginError').textContent='Dashboard setup incomplete: add your Supabase URL and publishable key in this file.';return;}
+    const {data,error}=await client.auth.signInWithPassword({email:$('email').value,password:$('password').value});
+    if(error){$('loginError').textContent=error.message;return;} showDashboard(data.user); await loadRows();
+  });
+  $('logout').addEventListener('click', async ()=>{await client.auth.signOut();showLogin();});
+  $('refresh').addEventListener('click', loadRows); $('search').addEventListener('input', render);
+  if(!CONFIGURED){$('loginError').textContent='Admin setup required: configure the Supabase URL and publishable key in dashboard/index.html.';}
+  else {
+    client.auth.getSession().then(async ({data})=>{if(data.session){showDashboard(data.session.user);await loadRows();}else showLogin();});
+    client.auth.onAuthStateChange((_event,session)=>{if(session){showDashboard(session.user);}else showLogin();});
+    setInterval(async()=>{const {data}=await client.auth.getSession();if(data.session) await loadRows();},30000);
+  }
+</script>
+</body>
+</html>

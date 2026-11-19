@@ -25,7 +25,7 @@ create policy "dashboard_admin_read_accounts"
 on public.fakeface_accounts
 for select
 to authenticated
-using (auth.uid() = 'REPLACE_WITH_AUTH_USER_UUID'::uuid);
+using (auth.uid() = '7fc46951-e9dd-4bb1-9dab-1ac5b06ba4bb'::uuid);
 
 -- A safe read-only view. It intentionally excludes email and password_ciphertext.
 create or replace view public.dashboard_accounts
